@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ระบบสแกนคำตอบ (A,B,C,D)</title>
+    <title>ระบบสแกนคำตอบ V3</title>
     <script type="text/javascript" src="https://cdn.jsdelivr.net/gh/jcmellado/js-aruco/src/cv.js"></script>
     <script type="text/javascript" src="https://cdn.jsdelivr.net/gh/jcmellado/js-aruco/src/aruco.js"></script>
     <style>
@@ -11,7 +11,6 @@
         h2 { font-size: 1.2rem; margin: 10px 0; }
         .container { display: flex; justify-content: center; align-items: center; flex-direction: column; width: 100%; padding: 10px; box-sizing: border-box; }
         
-        /* ล็อกขนาดแสดงผลให้พอดีหน้าจอ */
         canvas { 
             border: 2px solid #333; 
             border-radius: 8px; 
@@ -24,28 +23,14 @@
         button { margin-top: 15px; padding: 12px 24px; font-size: 18px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
         button:active { background-color: #0056b3; }
         
-        /* กล่องรายงานผลสำหรับตรวจเช็คปัญหา */
-        #logBox {
-            margin: 20px auto;
-            padding: 10px;
-            width: 90%;
-            max-width: 500px;
-            background-color: #fff;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            font-size: 12px;
-            text-align: left;
-            font-family: monospace;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }
+        #logBox { margin: 20px auto; padding: 10px; width: 90%; max-width: 500px; background-color: #fff; border: 1px solid #ccc; border-radius: 5px; font-size: 12px; text-align: left; font-family: monospace; white-space: pre-wrap; word-wrap: break-word; }
     </style>
 </head>
 <body>
-    <h2>สแกนหาคำตอบ V2</h2>
+    <h2>สแกนหาคำตอบ V3 (แก้สัดส่วนภาพ)</h2>
     <div class="container">
         <video id="video" autoplay playsinline muted style="display:none;"></video>
-        <canvas id="canvas" width="400" height="300"></canvas>
+        <canvas id="canvas"></canvas>
         <button id="startBtn">เปิดกล้อง / เริ่มสแกน</button>
     </div>
 
@@ -66,34 +51,26 @@
 
         function startCamera() {
             writeLog("กำลังขอสิทธิ์เปิดกล้องหลัง...");
-            let constraints = { 
-                video: { 
-                    facingMode: "environment",
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
-                } 
-            };
-
-            navigator.mediaDevices.getUserMedia(constraints)
-                .then(function(stream) {
-                    writeLog("เปิดกล้องสำเร็จ เชื่อมต่อวิดีโอ...");
-                    video.srcObject = stream;
-                    
-                    // บังคับให้เล่นวิดีโอ (สำหรับ iOS)
-                    video.play().then(() => {
-                        writeLog("วิดีโอกำลังเล่น เริ่มระบบสแกน...");
-                        isScanning = true;
-                        startBtn.innerText = "กำลังสแกน...";
-                        startBtn.style.backgroundColor = "#28a745";
-                        requestAnimationFrame(tick);
-                    }).catch(e => {
-                        writeLog("วิดีโอไม่ยอมเล่น: " + e.message);
-                    });
-                })
-                .catch(function(err) {
-                    writeLog("เกิดข้อผิดพลาดในการเปิดกล้อง: " + err.name + " - " + err.message);
-                    alert("ไม่สามารถเปิดกล้องได้ กรุณาเช็คการอนุญาตกล้องในตั้งค่า Safari");
+            navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 640 } } 
+            })
+            .then(function(stream) {
+                writeLog("เปิดกล้องสำเร็จ เชื่อมต่อวิดีโอ...");
+                video.srcObject = stream;
+                
+                video.play().then(() => {
+                    writeLog("วิดีโอกำลังเล่น เริ่มระบบสแกน...");
+                    isScanning = true;
+                    startBtn.innerText = "กำลังสแกน...";
+                    startBtn.style.backgroundColor = "#28a745";
+                    requestAnimationFrame(tick);
+                }).catch(e => {
+                    writeLog("วิดีโอไม่ยอมเล่น: " + e.message);
                 });
+            })
+            .catch(function(err) {
+                writeLog("เกิดข้อผิดพลาด: " + err.message);
+            });
         }
 
         startBtn.addEventListener('click', function() {
@@ -102,56 +79,64 @@
 
         let frameCount = 0;
         function tick() {
-            if (isScanning) {
-                requestAnimationFrame(tick);
+            if (isScanning && video.readyState === video.HAVE_ENOUGH_DATA) {
                 
-                if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                    if (frameCount === 0) {
-                        writeLog("ได้รับข้อมูลภาพเฟรมแรกแล้ว (กำลังสแกนหา Marker)");
-                        frameCount++;
-                    }
+                // หัวใจสำคัญ: ปรับขนาด Canvas ให้ตรงกับสัดส่วนจริงของกล้องมือถือ เพื่อไม่ให้ภาพเพี้ยน
+                if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+                    // ย่อขนาดลงมาให้ประมวลผลเร็วขึ้น แต่ยังคงสัดส่วนเดิมเป๊ะๆ
+                    let scale = Math.min(640 / video.videoWidth, 640 / video.videoHeight, 1);
+                    canvas.width = video.videoWidth * scale;
+                    canvas.height = video.videoHeight * scale;
+                    writeLog("ปรับสัดส่วนภาพอัตโนมัติสำเร็จ: " + canvas.width + "x" + canvas.height);
+                }
 
-                    // วาดและประมวลผลตามขนาด Canvas ที่ล็อกไว้
-                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                    let imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-                    let markers = detector.detect(imageData);
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                let imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                let markers = detector.detect(imageData);
 
-                    if (markers.length > 0) {
-                        for (let i = 0; i < markers.length; i++) {
-                            let corners = markers[i].corners;
-                            let markerId = markers[i].id;
-                            
-                            context.strokeStyle = "#00ff00";
-                            context.lineWidth = 4;
-                            context.beginPath();
-                            context.moveTo(corners[0].x, corners[0].y);
-                            context.lineTo(corners[1].x, corners[1].y);
-                            context.lineTo(corners[2].x, corners[2].y);
-                            context.lineTo(corners[3].x, corners[3].y);
-                            context.closePath();
-                            context.stroke();
+                if (frameCount === 0) {
+                    writeLog("ได้รับข้อมูลภาพเฟรมแรกแล้ว (กำลังสแกนหา Marker)");
+                    frameCount++;
+                }
 
-                            let dx = corners[1].x - corners[0].x;
-                            let dy = corners[1].y - corners[0].y;
-                            let angle = Math.atan2(dy, dx) * (180 / Math.PI);
-                            if (angle < 0) angle += 360; 
+                if (markers.length > 0) {
+                    for (let i = 0; i < markers.length; i++) {
+                        let corners = markers[i].corners;
+                        let markerId = markers[i].id;
+                        
+                        context.strokeStyle = "#00ff00";
+                        context.lineWidth = 4;
+                        context.beginPath();
+                        context.moveTo(corners[0].x, corners[0].y);
+                        context.lineTo(corners[1].x, corners[1].y);
+                        context.lineTo(corners[2].x, corners[2].y);
+                        context.lineTo(corners[3].x, corners[3].y);
+                        context.closePath();
+                        context.stroke();
 
-                            let answer = "";
-                            if (angle >= 315 || angle < 45) answer = "A";
-                            else if (angle >= 45 && angle < 135) answer = "B";
-                            else if (angle >= 135 && angle < 225) answer = "C";
-                            else if (angle >= 225 && angle < 315) answer = "D";
+                        let dx = corners[1].x - corners[0].x;
+                        let dy = corners[1].y - corners[0].y;
+                        let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+                        if (angle < 0) angle += 360; 
 
-                            let displayText = "ID: " + markerId + " = " + answer;
-                            context.fillStyle = "rgba(255, 255, 255, 0.8)";
-                            context.fillRect(corners[0].x - 5, corners[0].y - 45, 160, 40);
+                        let answer = "";
+                        if (angle >= 315 || angle < 45) answer = "A";
+                        else if (angle >= 45 && angle < 135) answer = "B";
+                        else if (angle >= 135 && angle < 225) answer = "C";
+                        else if (angle >= 225 && angle < 315) answer = "D";
 
-                            context.fillStyle = "red";
-                            context.font = "bold 24px Arial";
-                            context.fillText(displayText, corners[0].x, corners[0].y - 15);
-                        }
+                        context.fillStyle = "rgba(255, 255, 255, 0.8)";
+                        context.fillRect(corners[0].x - 5, corners[0].y - 45, 160, 40);
+
+                        context.fillStyle = "red";
+                        context.font = "bold 24px Arial";
+                        context.fillText("ID: " + markerId + " = " + answer, corners[0].x, corners[0].y - 15);
                     }
                 }
+            }
+            // เรียกซ้ำให้สแกนต่อเนื่อง
+            if (isScanning) {
+                requestAnimationFrame(tick);
             }
         }
     </script>
