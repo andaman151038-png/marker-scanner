@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ระบบสแกนคำตอบ V3</title>
+    <title>ระบบสแกนคำตอบ V4</title>
     <script type="text/javascript" src="https://cdn.jsdelivr.net/gh/jcmellado/js-aruco/src/cv.js"></script>
     <script type="text/javascript" src="https://cdn.jsdelivr.net/gh/jcmellado/js-aruco/src/aruco.js"></script>
     <style>
@@ -15,7 +15,7 @@
             border: 2px solid #333; 
             border-radius: 8px; 
             background-color: #000; 
-            width: 100%; 
+            width: 100%; /* บีบขนาดหน้าจอด้วย CSS เท่านั้น ไม่กระทบไฟล์ภาพจริง */
             max-width: 500px; 
             height: auto; 
         }
@@ -27,7 +27,7 @@
     </style>
 </head>
 <body>
-    <h2>สแกนหาคำตอบ V3 (แก้สัดส่วนภาพ)</h2>
+    <h2>สแกนหาคำตอบ V4 (สัดส่วนแท้ 100%)</h2>
     <div class="container">
         <video id="video" autoplay playsinline muted style="display:none;"></video>
         <canvas id="canvas"></canvas>
@@ -51,9 +51,8 @@
 
         function startCamera() {
             writeLog("กำลังขอสิทธิ์เปิดกล้องหลัง...");
-            navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 640 } } 
-            })
+            // ปลดล็อกการบังคับขนาดกล้องทั้งหมด ให้ iOS ตัดสินใจเอง
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
             .then(function(stream) {
                 writeLog("เปิดกล้องสำเร็จ เชื่อมต่อวิดีโอ...");
                 video.srcObject = stream;
@@ -81,21 +80,16 @@
         function tick() {
             if (isScanning && video.readyState === video.HAVE_ENOUGH_DATA) {
                 
-                // หัวใจสำคัญ: ปรับขนาด Canvas ให้ตรงกับสัดส่วนจริงของกล้องมือถือ เพื่อไม่ให้ภาพเพี้ยน
-                if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-                    // ย่อขนาดลงมาให้ประมวลผลเร็วขึ้น แต่ยังคงสัดส่วนเดิมเป๊ะๆ
-                    let scale = Math.min(640 / video.videoWidth, 640 / video.videoHeight, 1);
-                    canvas.width = video.videoWidth * scale;
-                    canvas.height = video.videoHeight * scale;
-                    writeLog("ปรับสัดส่วนภาพอัตโนมัติสำเร็จ: " + canvas.width + "x" + canvas.height);
-                }
+                // หัวใจสำคัญ: ล็อกขนาด Canvas ให้เท่ากับความละเอียดกล้องเป๊ะๆ ทุกเฟรม
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
 
                 context.drawImage(video, 0, 0, canvas.width, canvas.height);
                 let imageData = context.getImageData(0, 0, canvas.width, canvas.height);
                 let markers = detector.detect(imageData);
 
                 if (frameCount === 0) {
-                    writeLog("ได้รับข้อมูลภาพเฟรมแรกแล้ว (กำลังสแกนหา Marker)");
+                    writeLog("ได้รับข้อมูลภาพเฟรมแรก ความละเอียดจริง: " + video.videoWidth + "x" + video.videoHeight);
                     frameCount++;
                 }
 
@@ -105,7 +99,7 @@
                         let markerId = markers[i].id;
                         
                         context.strokeStyle = "#00ff00";
-                        context.lineWidth = 4;
+                        context.lineWidth = Math.max(5, canvas.width / 150); // ปรับขนาดเส้นตามสัดส่วนจอ
                         context.beginPath();
                         context.moveTo(corners[0].x, corners[0].y);
                         context.lineTo(corners[1].x, corners[1].y);
@@ -125,16 +119,17 @@
                         else if (angle >= 135 && angle < 225) answer = "C";
                         else if (angle >= 225 && angle < 315) answer = "D";
 
+                        // ปรับขนาดตัวหนังสือให้ไม่เล็กเกินไปเมื่อกล้องความละเอียดสูง
+                        let fontSize = Math.floor(canvas.width / 15);
                         context.fillStyle = "rgba(255, 255, 255, 0.8)";
-                        context.fillRect(corners[0].x - 5, corners[0].y - 45, 160, 40);
+                        context.fillRect(corners[0].x - 10, corners[0].y - (fontSize + 20), fontSize * 6, fontSize + 20);
 
                         context.fillStyle = "red";
-                        context.font = "bold 24px Arial";
+                        context.font = "bold " + fontSize + "px Arial";
                         context.fillText("ID: " + markerId + " = " + answer, corners[0].x, corners[0].y - 15);
                     }
                 }
             }
-            // เรียกซ้ำให้สแกนต่อเนื่อง
             if (isScanning) {
                 requestAnimationFrame(tick);
             }
