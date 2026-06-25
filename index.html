@@ -11,7 +11,6 @@
         h2 { font-size: 1.2rem; margin: 10px 0; }
         .container { display: flex; justify-content: center; align-items: center; flex-direction: column; width: 100%; padding: 10px; box-sizing: border-box; }
         
-        /* ปรับให้ Canvas แสดงผลเต็มความกว้าง แต่รักษาสัดส่วนจริงของวิดีโอไว้ */
         canvas { 
             border: 2px solid #333; 
             border-radius: 8px; 
@@ -26,7 +25,7 @@
     </style>
 </head>
 <body>
-    <h2>สแกนหาคำตอบ (หมุนทิศทางเพื่อเปลี่ยนข้อ)</h2>
+    <h2>สแกนหาคำตอบ (เปิดผ่าน Chrome/Safari เท่านั้น)</h2>
     <div class="container">
         <video id="video" autoplay playsinline style="display:none;"></video>
         <canvas id="canvas"></canvas>
@@ -42,7 +41,16 @@
         let isScanning = false;
 
         function startCamera() {
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            // จำกัดความละเอียดของกล้องเพื่อไม่ให้มือถือทำงานหนักเกินไป
+            let constraints = { 
+                video: { 
+                    facingMode: "environment",
+                    width: { ideal: 640 }, // ร้องขอภาพขนาดเล็กลง
+                    height: { ideal: 480 }
+                } 
+            };
+
+            navigator.mediaDevices.getUserMedia(constraints)
                 .then(function(stream) {
                     video.srcObject = stream;
                     video.play();
@@ -50,10 +58,18 @@
                     startBtn.innerText = "กำลังสแกน...";
                     startBtn.style.backgroundColor = "#28a745";
                     
-                    // จุดที่แก้ไข: ดึงขนาดจริงของกล้องมือถือมาตั้งค่าให้หน้าจอ
                     video.onloadedmetadata = function() {
-                        canvas.width = video.videoWidth;
-                        canvas.height = video.videoHeight;
+                        // บังคับจำกัดขนาด Canvas ในการประมวลผล (Downscale)
+                        let maxRes = 640;
+                        let ratio = video.videoWidth / video.videoHeight;
+                        
+                        if (video.videoWidth > maxRes) {
+                            canvas.width = maxRes;
+                            canvas.height = maxRes / ratio;
+                        } else {
+                            canvas.width = video.videoWidth;
+                            canvas.height = video.videoHeight;
+                        }
                         requestAnimationFrame(tick);
                     };
                 })
@@ -97,6 +113,7 @@
                         if (angle < 0) angle += 360; 
 
                         let answer = "";
+                        // ปรับองศาการตัดสินใจให้กว้างขึ้น เพื่อให้หมุนมือถือได้ง่ายขึ้น
                         if (angle >= 315 || angle < 45) {
                             answer = "A";
                         } else if (angle >= 45 && angle < 135) {
@@ -107,10 +124,10 @@
                             answer = "D";
                         }
 
-                        let displayText = "ID: " + markerId + " = ข้อ " + answer;
+                        let displayText = "ID: " + markerId + " = " + answer;
                         
                         context.fillStyle = "rgba(255, 255, 255, 0.8)";
-                        context.fillRect(corners[0].x - 5, corners[0].y - 45, 200, 40);
+                        context.fillRect(corners[0].x - 5, corners[0].y - 45, 160, 40);
 
                         context.fillStyle = "red";
                         context.font = "bold 26px Arial";
