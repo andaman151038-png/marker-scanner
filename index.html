@@ -9,9 +9,19 @@
     <style>
         body { text-align: center; font-family: sans-serif; margin: 0; background-color: #f0f0f0; }
         h2 { font-size: 1.2rem; margin: 10px 0; }
-        .container { display: flex; justify-content: center; align-items: center; flex-direction: column; width: 100%; }
-        canvas { border: 2px solid #333; border-radius: 8px; background-color: #000; max-width: 100%; height: auto; }
-        button { margin-top: 15px; padding: 10px 20px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        .container { display: flex; justify-content: center; align-items: center; flex-direction: column; width: 100%; padding: 10px; box-sizing: border-box; }
+        
+        /* ปรับให้ Canvas แสดงผลเต็มความกว้าง แต่รักษาสัดส่วนจริงของวิดีโอไว้ */
+        canvas { 
+            border: 2px solid #333; 
+            border-radius: 8px; 
+            background-color: #000; 
+            width: 100%; 
+            max-width: 600px; 
+            height: auto; 
+        }
+        
+        button { margin-top: 15px; padding: 12px 24px; font-size: 18px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
         button:active { background-color: #0056b3; }
     </style>
 </head>
@@ -19,7 +29,7 @@
     <h2>สแกนหาคำตอบ (หมุนทิศทางเพื่อเปลี่ยนข้อ)</h2>
     <div class="container">
         <video id="video" autoplay playsinline style="display:none;"></video>
-        <canvas id="canvas" width="640" height="480"></canvas>
+        <canvas id="canvas"></canvas>
         <button id="startBtn">เปิดกล้อง / เริ่มสแกน</button>
     </div>
 
@@ -39,7 +49,13 @@
                     isScanning = true;
                     startBtn.innerText = "กำลังสแกน...";
                     startBtn.style.backgroundColor = "#28a745";
-                    requestAnimationFrame(tick);
+                    
+                    // จุดที่แก้ไข: ดึงขนาดจริงของกล้องมือถือมาตั้งค่าให้หน้าจอ
+                    video.onloadedmetadata = function() {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        requestAnimationFrame(tick);
+                    };
                 })
                 .catch(function(err) {
                     console.error("Error: ", err);
@@ -52,62 +68,53 @@
         });
 
         function tick() {
-            if (isScanning) {
+            if (isScanning && video.readyState === video.HAVE_ENOUGH_DATA) {
                 requestAnimationFrame(tick);
-                if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                    let imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-                    let markers = detector.detect(imageData);
+                
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                let imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                let markers = detector.detect(imageData);
 
-                    if (markers.length > 0) {
-                        for (let i = 0; i < markers.length; i++) {
-                            let corners = markers[i].corners;
-                            let markerId = markers[i].id;
-                            
-                            // 1. วาดเส้นกรอบรอบ Marker
-                            context.strokeStyle = "#00ff00"; // เปลี่ยนกรอบเป็นสีเขียวให้เห็นชัดๆ
-                            context.lineWidth = 3;
-                            context.beginPath();
-                            context.moveTo(corners[0].x, corners[0].y);
-                            context.lineTo(corners[1].x, corners[1].y);
-                            context.lineTo(corners[2].x, corners[2].y);
-                            context.lineTo(corners[3].x, corners[3].y);
-                            context.closePath();
-                            context.stroke();
+                if (markers.length > 0) {
+                    for (let i = 0; i < markers.length; i++) {
+                        let corners = markers[i].corners;
+                        let markerId = markers[i].id;
+                        
+                        context.strokeStyle = "#00ff00";
+                        context.lineWidth = 4;
+                        context.beginPath();
+                        context.moveTo(corners[0].x, corners[0].y);
+                        context.lineTo(corners[1].x, corners[1].y);
+                        context.lineTo(corners[2].x, corners[2].y);
+                        context.lineTo(corners[3].x, corners[3].y);
+                        context.closePath();
+                        context.stroke();
 
-                            // 2. คำนวณมุมองศา เพื่อหาตัวเลือก A, B, C, D
-                            // ใช้จุดที่ 0 และ 1 (ขอบด้านบนของ Marker) เพื่อดูว่าหมุนไปทางไหน
-                            let dx = corners[1].x - corners[0].x;
-                            let dy = corners[1].y - corners[0].y;
-                            let angle = Math.atan2(dy, dx) * (180 / Math.PI);
-                            
-                            // ปรับค่ามุมให้เป็น 0 - 360 องศา
-                            if (angle < 0) angle += 360; 
+                        let dx = corners[1].x - corners[0].x;
+                        let dy = corners[1].y - corners[0].y;
+                        let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+                        
+                        if (angle < 0) angle += 360; 
 
-                            // กำหนดเงื่อนไขทิศทาง (เผื่อความคลาดเคลื่อนของการเอียงมือ +/- 45 องศา)
-                            let answer = "";
-                            if (angle >= 315 || angle < 45) {
-                                answer = "A"; // ปกติ (ขอบบนอยู่ด้านบน)
-                            } else if (angle >= 45 && angle < 135) {
-                                answer = "B"; // หมุนขวา
-                            } else if (angle >= 135 && angle < 225) {
-                                answer = "C"; // กลับหัว
-                            } else if (angle >= 225 && angle < 315) {
-                                answer = "D"; // หมุนซ้าย
-                            }
-
-                            // 3. แสดงผลบนหน้าจอ (โชว์ทั้ง ID และคำตอบ)
-                            let displayText = "ID: " + markerId + " = ข้อ " + answer;
-                            
-                            // สร้างพื้นหลังข้อความเพื่อให้เห็นชัดขึ้น
-                            context.fillStyle = "rgba(255, 255, 255, 0.8)";
-                            context.fillRect(corners[0].x - 5, corners[0].y - 45, 180, 40);
-
-                            // พิมพ์ข้อความ
-                            context.fillStyle = "red";
-                            context.font = "bold 24px Arial";
-                            context.fillText(displayText, corners[0].x, corners[0].y - 15);
+                        let answer = "";
+                        if (angle >= 315 || angle < 45) {
+                            answer = "A";
+                        } else if (angle >= 45 && angle < 135) {
+                            answer = "B";
+                        } else if (angle >= 135 && angle < 225) {
+                            answer = "C";
+                        } else if (angle >= 225 && angle < 315) {
+                            answer = "D";
                         }
+
+                        let displayText = "ID: " + markerId + " = ข้อ " + answer;
+                        
+                        context.fillStyle = "rgba(255, 255, 255, 0.8)";
+                        context.fillRect(corners[0].x - 5, corners[0].y - 45, 200, 40);
+
+                        context.fillStyle = "red";
+                        context.font = "bold 26px Arial";
+                        context.fillText(displayText, corners[0].x, corners[0].y - 15);
                     }
                 }
             }
