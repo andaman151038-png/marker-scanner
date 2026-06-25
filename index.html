@@ -11,71 +11,88 @@
         h2 { font-size: 1.2rem; margin: 10px 0; }
         .container { display: flex; justify-content: center; align-items: center; flex-direction: column; width: 100%; padding: 10px; box-sizing: border-box; }
         
+        /* ล็อกขนาดแสดงผลให้พอดีหน้าจอ */
         canvas { 
             border: 2px solid #333; 
             border-radius: 8px; 
             background-color: #000; 
             width: 100%; 
-            max-width: 600px; 
+            max-width: 500px; 
             height: auto; 
         }
         
         button { margin-top: 15px; padding: 12px 24px; font-size: 18px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
         button:active { background-color: #0056b3; }
+        
+        /* กล่องรายงานผลสำหรับตรวจเช็คปัญหา */
+        #logBox {
+            margin: 20px auto;
+            padding: 10px;
+            width: 90%;
+            max-width: 500px;
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 12px;
+            text-align: left;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
     </style>
 </head>
 <body>
-    <h2>สแกนหาคำตอบ (เปิดผ่าน Chrome/Safari เท่านั้น)</h2>
+    <h2>สแกนหาคำตอบ V2</h2>
     <div class="container">
-        <video id="video" autoplay playsinline style="display:none;"></video>
-        <canvas id="canvas"></canvas>
+        <video id="video" autoplay playsinline muted style="display:none;"></video>
+        <canvas id="canvas" width="400" height="300"></canvas>
         <button id="startBtn">เปิดกล้อง / เริ่มสแกน</button>
     </div>
+
+    <div id="logBox">ระบบพร้อมทำงาน...</div>
 
     <script>
         let video = document.getElementById("video");
         let canvas = document.getElementById("canvas");
         let context = canvas.getContext("2d");
         let startBtn = document.getElementById("startBtn");
+        let logBox = document.getElementById("logBox");
         let detector = new AR.Detector();
         let isScanning = false;
 
+        function writeLog(text) {
+            logBox.innerText += "\n> " + text;
+        }
+
         function startCamera() {
-            // จำกัดความละเอียดของกล้องเพื่อไม่ให้มือถือทำงานหนักเกินไป
+            writeLog("กำลังขอสิทธิ์เปิดกล้องหลัง...");
             let constraints = { 
                 video: { 
                     facingMode: "environment",
-                    width: { ideal: 640 }, // ร้องขอภาพขนาดเล็กลง
+                    width: { ideal: 640 },
                     height: { ideal: 480 }
                 } 
             };
 
             navigator.mediaDevices.getUserMedia(constraints)
                 .then(function(stream) {
+                    writeLog("เปิดกล้องสำเร็จ เชื่อมต่อวิดีโอ...");
                     video.srcObject = stream;
-                    video.play();
-                    isScanning = true;
-                    startBtn.innerText = "กำลังสแกน...";
-                    startBtn.style.backgroundColor = "#28a745";
                     
-                    video.onloadedmetadata = function() {
-                        // บังคับจำกัดขนาด Canvas ในการประมวลผล (Downscale)
-                        let maxRes = 640;
-                        let ratio = video.videoWidth / video.videoHeight;
-                        
-                        if (video.videoWidth > maxRes) {
-                            canvas.width = maxRes;
-                            canvas.height = maxRes / ratio;
-                        } else {
-                            canvas.width = video.videoWidth;
-                            canvas.height = video.videoHeight;
-                        }
+                    // บังคับให้เล่นวิดีโอ (สำหรับ iOS)
+                    video.play().then(() => {
+                        writeLog("วิดีโอกำลังเล่น เริ่มระบบสแกน...");
+                        isScanning = true;
+                        startBtn.innerText = "กำลังสแกน...";
+                        startBtn.style.backgroundColor = "#28a745";
                         requestAnimationFrame(tick);
-                    };
+                    }).catch(e => {
+                        writeLog("วิดีโอไม่ยอมเล่น: " + e.message);
+                    });
                 })
                 .catch(function(err) {
-                    console.error("Error: ", err);
-                    alert("ไม่สามารถเปิดกล้องได้");
+                    writeLog("เกิดข้อผิดพลาดในการเปิดกล้อง: " + err.name + " - " + err.message);
+                    alert("ไม่สามารถเปิดกล้องได้ กรุณาเช็คการอนุญาตกล้องในตั้งค่า Safari");
                 });
         }
 
@@ -83,55 +100,56 @@
             if (!isScanning) startCamera();
         });
 
+        let frameCount = 0;
         function tick() {
-            if (isScanning && video.readyState === video.HAVE_ENOUGH_DATA) {
+            if (isScanning) {
                 requestAnimationFrame(tick);
                 
-                context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                let imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-                let markers = detector.detect(imageData);
+                if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                    if (frameCount === 0) {
+                        writeLog("ได้รับข้อมูลภาพเฟรมแรกแล้ว (กำลังสแกนหา Marker)");
+                        frameCount++;
+                    }
 
-                if (markers.length > 0) {
-                    for (let i = 0; i < markers.length; i++) {
-                        let corners = markers[i].corners;
-                        let markerId = markers[i].id;
-                        
-                        context.strokeStyle = "#00ff00";
-                        context.lineWidth = 4;
-                        context.beginPath();
-                        context.moveTo(corners[0].x, corners[0].y);
-                        context.lineTo(corners[1].x, corners[1].y);
-                        context.lineTo(corners[2].x, corners[2].y);
-                        context.lineTo(corners[3].x, corners[3].y);
-                        context.closePath();
-                        context.stroke();
+                    // วาดและประมวลผลตามขนาด Canvas ที่ล็อกไว้
+                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    let imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                    let markers = detector.detect(imageData);
 
-                        let dx = corners[1].x - corners[0].x;
-                        let dy = corners[1].y - corners[0].y;
-                        let angle = Math.atan2(dy, dx) * (180 / Math.PI);
-                        
-                        if (angle < 0) angle += 360; 
+                    if (markers.length > 0) {
+                        for (let i = 0; i < markers.length; i++) {
+                            let corners = markers[i].corners;
+                            let markerId = markers[i].id;
+                            
+                            context.strokeStyle = "#00ff00";
+                            context.lineWidth = 4;
+                            context.beginPath();
+                            context.moveTo(corners[0].x, corners[0].y);
+                            context.lineTo(corners[1].x, corners[1].y);
+                            context.lineTo(corners[2].x, corners[2].y);
+                            context.lineTo(corners[3].x, corners[3].y);
+                            context.closePath();
+                            context.stroke();
 
-                        let answer = "";
-                        // ปรับองศาการตัดสินใจให้กว้างขึ้น เพื่อให้หมุนมือถือได้ง่ายขึ้น
-                        if (angle >= 315 || angle < 45) {
-                            answer = "A";
-                        } else if (angle >= 45 && angle < 135) {
-                            answer = "B";
-                        } else if (angle >= 135 && angle < 225) {
-                            answer = "C";
-                        } else if (angle >= 225 && angle < 315) {
-                            answer = "D";
+                            let dx = corners[1].x - corners[0].x;
+                            let dy = corners[1].y - corners[0].y;
+                            let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+                            if (angle < 0) angle += 360; 
+
+                            let answer = "";
+                            if (angle >= 315 || angle < 45) answer = "A";
+                            else if (angle >= 45 && angle < 135) answer = "B";
+                            else if (angle >= 135 && angle < 225) answer = "C";
+                            else if (angle >= 225 && angle < 315) answer = "D";
+
+                            let displayText = "ID: " + markerId + " = " + answer;
+                            context.fillStyle = "rgba(255, 255, 255, 0.8)";
+                            context.fillRect(corners[0].x - 5, corners[0].y - 45, 160, 40);
+
+                            context.fillStyle = "red";
+                            context.font = "bold 24px Arial";
+                            context.fillText(displayText, corners[0].x, corners[0].y - 15);
                         }
-
-                        let displayText = "ID: " + markerId + " = " + answer;
-                        
-                        context.fillStyle = "rgba(255, 255, 255, 0.8)";
-                        context.fillRect(corners[0].x - 5, corners[0].y - 45, 160, 40);
-
-                        context.fillStyle = "red";
-                        context.font = "bold 26px Arial";
-                        context.fillText(displayText, corners[0].x, corners[0].y - 15);
                     }
                 }
             }
